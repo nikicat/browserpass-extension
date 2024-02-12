@@ -24,8 +24,10 @@ In order to use Browserpass you must also install a [companion native messaging 
     -   [Modal HTTP authentication](#modal-http-authentication)
     -   [Password store locations](#password-store-locations)
 -   [Options](#options)
--   -   [A note about autosubmit](#a-note-about-autosubmit)
--   -   [A note about OTP](#a-note-about-otp)
+    -   [A note about autosubmit](#a-note-about-autosubmit)
+    -   [OTP](#otp)
+        -   [A note about OTP](#a-note-about-otp)
+        -   [OTP Usage](#otp-usage)
 -   [Usage data](#usage-data)
 -   [Security](#security)
 -   [Privacy](#privacy)
@@ -53,7 +55,7 @@ In order to install Browserpass correctly, you have to install two of its compon
 -   Browser extension for Chromium-based browsers (choose one of the options):
     -   Install using a package manager for your OS (which will provide auto-update and keep extension in sync with native host app):
         -   Arch Linux: [browserpass-chromium](https://www.archlinux.org/packages/community/any/browserpass-chromium/), [browserpass-chrome](https://aur.archlinux.org/packages/browserpass-chrome/)
-        -   Debian: [webext-browserpass](https://packages.debian.org/sid/webext-browserpass) includes Chromium extension
+        -   Debian: [webext-browserpass](https://packages.debian.org/stable/webext-browserpass) includes Chromium extension
     -   Install the extension from [Chrome Web Store](https://chrome.google.com/webstore/detail/browserpass-ce/naepdomgkenhinolocfifgehidddafch) (which will provide auto-updates)
     -   Download `browserpass-webstore.crx` from the latest release and drag'n'drop it into `chrome://extensions`
         -   This extension has the same ID as the one in Chrome Web Store, so when a new version will appear in Web Store, it will auto-update! Use if you want to be on latest and greatest version.
@@ -63,7 +65,7 @@ In order to install Browserpass correctly, you have to install two of its compon
 -   Browser extension for Firefox-based browsers (choose one of the options):
     -   Install using a package manager for your OS (which will provide auto-update and keep extension in sync with native host app):
         -   Arch Linux: [browserpass-firefox](https://www.archlinux.org/packages/community/any/browserpass-firefox/)
-        -   Debian: [webext-browserpass](https://packages.debian.org/sid/webext-browserpass) includes Firefox extension
+        -   Debian: [webext-browserpass](https://packages.debian.org/stable/webext-browserpass) includes Firefox extension
     -   Install the extension from [Firefox Add-ons](https://addons.mozilla.org/en-US/firefox/addon/browserpass-ce/) (which will provide auto-updates)
     -   Download `browserpass-firefox.zip` from the latest release, unarchive and use `Load Temporary Add-on` on `about:debugging#addons` (remember the extension will be removed after browser is closed!).
 
@@ -205,13 +207,19 @@ OpenID is often used when someone doesn't trust (or doesn't want to need to trus
 
 Due to the way browsers are implemented, browser extensions are only able to fill modal credentials (e.g. a popup for basic HTTP auth) for a website if the website in question has been opened by the extension. For this reason alone Browserpass contains functionality to open a URL associated with a password entry in the current or a new browser tab. However, please note that Browserpass is not intended as a bookmark manager.
 
-If you want Browserpass to handle modal authentication, you must open these websites using Browserpass. This will cause Browserpass to open the target site, and transparently intercept and fill the authentication request. You will not normally see a login popup unless the credentials are incorrect.
+If you want Browserpass to handle modal authentication, you must open these websites using Browserpass with <kbd>Ctrl+G</kbd> or <kbd>Ctrl+Shift+G</kbd>. This will cause Browserpass to open the target site, and transparently intercept and fill the authentication request. You will not normally see a login popup unless the credentials are incorrect.
 
 ### Password store locations
 
 Browserpass is able to automatically detect your password store location: it first checks the `$PASSWORD_STORE_DIR` environment variable. If that variable is not defined, it falls back to `$HOME/.password-store`.
 
 Using the `Custom store locations` setting in the browser extension options, you are able to define one or more custom locations for password stores. There are no restrictions on where these may be located; they can be subfolders of the main password store, gopass mounts, or any other folder that contains password entries.
+
+#### OTP usage
+
+TOTP seeds may be provided either as an otpauth URL (e.g. `otpauth://totp/Example:alice@google.com?secret=JBSWY3DPEHPK3PXP&issuer=Example`) or as a plain seed (e.g. `totp: JBSWY3DPEHPK3PXP`). Please note that the plain form is unsuitable for any TOTP implementation that does not use a period of 30 seconds and a length of 6 digits.
+
+The generated OTP code will be automatically copied to the clipboard immediately after the login form is filled. It can also be viewed without copying to the clipboard by clicking on the Browserpass popup, then entering the > details screen for the login entry in question.
 
 ## Options
 
@@ -258,7 +266,9 @@ While we provide autosubmit as an option for users, we do not recommend it. This
 
 As the demand for autosubmit is extremely high, we have decided to provide it anyway - however it is disabled by default, and we recommend that users do not enable it.
 
-### A note about OTP
+### OTP
+
+#### A note about OTP
 
 Tools like `pass-otp` make it possible to use `pass` for generating OTP codes, however keeping both passwords and OTP URI in the same location diminishes the major benefit that OTP is supposed to provide: two factor authentication. The purpose of multi-factor authentication is to protect your account even when attackers gain access to your password store, but if your OTP seed is stored in the same place, all auth factors will be compromised at once. In particular, Browserpass has access to the entire contents of your password entries, so if it is ever compromised, all your accounts will be at risk, even though you signed up for 2FA.
 
@@ -356,7 +366,7 @@ If you simply want to re-use the same credentials on multiple subdomains of the 
 
 ### Why Browserpass on Firefox does not work on Mozilla domains?
 
-Firefox has decided to [block all extensions from injecting any content scripts on their domains](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Content_scripts), sadly there's nothing we can do about it.
+Firefox has decided to [block all extensions from injecting any content scripts on their domains by default](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Content_scripts), sadly there's nothing we can do about it. It is possible to disable this behavior on a per-domain basis by changing the `extensions.webextensions.restrictedDomains` setting in `about:config`, however be aware that this affects all extensions, not just browserpass.
 
 The full list of blocked domains at the time of writing is:
 

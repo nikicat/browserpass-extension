@@ -433,6 +433,11 @@
      * @return bool Whether the update succeeded
      */
     function update(field, value, form) {
+        if (value === undefined) {
+            // undefined values should not be filled, but are always considered successful
+            return true;
+        }
+
         if (!value.length) {
             return false;
         }
@@ -446,7 +451,7 @@
             el.dispatchEvent(new Event(eventName, { bubbles: true }));
         }
 
-        // Focus may have triggered unvealing a true input, find it again
+        // Focus may have triggered unveiling a true input, find it again
         el = find(field, form);
         if (!el) {
             return false;

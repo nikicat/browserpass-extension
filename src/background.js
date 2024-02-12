@@ -17,9 +17,14 @@ var defaultSettings = {
     stores: {},
     foreignFills: {},
     username: null,
-    theme: "dark",
+    theme: "auto",
     enableOTP: false,
     hideBadge: false,
+    caps: {
+        save: false,
+        delete: false,
+        tree: false,
+    },
 };
 
 var authListeners = {};
@@ -265,7 +270,7 @@ async function saveRecent(settings, login, remove = false) {
  * @return array list of filled fields
  */
 async function dispatchFill(settings, request, allFrames, allowForeign, allowNoSecret) {
-    request = Object.assign(deepCopy(request), {
+    request = Object.assign(helpers.deepCopy(request), {
         allowForeign: allowForeign,
         allowNoSecret: allowNoSecret,
         foreignFills: settings.foreignFills[settings.origin] || {},
@@ -310,7 +315,7 @@ async function dispatchFill(settings, request, allFrames, allowForeign, allowNoS
  * @return void
  */
 async function dispatchFocusOrSubmit(settings, request, allFrames, allowForeign) {
-    request = Object.assign(deepCopy(request), {
+    request = Object.assign(helpers.deepCopy(request), {
         allowForeign: allowForeign,
         foreignFills: settings.foreignFills[settings.origin] || {},
     });
@@ -456,7 +461,7 @@ async function fillFields(settings, login, fields) {
     // build focus or submit request
     let focusOrSubmitRequest = {
         origin: new BrowserpassURL(settings.tab.url).origin,
-        autoSubmit: getSetting("autoSubmit", login, settings),
+        autoSubmit: helpers.getSetting("autoSubmit", login, settings),
         filledFields: filledFields,
     };
 
@@ -474,7 +479,7 @@ async function fillFields(settings, login, fields) {
  * @return object Local settings from the extension
  */
 function getLocalSettings() {
-    var settings = deepCopy(defaultSettings);
+    var settings = helpers.deepCopy(defaultSettings);
     for (var key in settings) {
         var value = localStorage.getItem(key);
         if (value !== null) {
@@ -494,7 +499,7 @@ function getLocalSettings() {
  */
 async function getFullSettings() {
     var settings = getLocalSettings();
-    var configureSettings = Object.assign(deepCopy(settings), {
+    var configureSettings = Object.assign(helpers.deepCopy(settings), {
         defaultStore: {},
     });
     var response = await hostAction(configureSettings, "configure");
@@ -502,6 +507,12 @@ async function getFullSettings() {
         settings.hostError = response;
     }
     settings.version = response.version;
+    const EDIT_VERSION = 3 * 1000000 + 1 * 1000 + 0;
+
+    // host capabilities
+    settings.caps.save = settings.version >= EDIT_VERSION;
+    settings.caps.delete = settings.version >= EDIT_VERSION;
+    settings.caps.tree = settings.version >= EDIT_VERSION;
 
     // Fill store settings, only makes sense if 'configure' succeeded
     if (response.status === "ok") {
@@ -587,18 +598,6 @@ function getSetting(key, login, settings) {
 }
 
 /**
- * Deep copy an object
- *
- * @since 3.0.0
- *
- * @param object obj an object to copy
- * @return object a new deep copy
- */
-function deepCopy(obj) {
-    return JSON.parse(JSON.stringify(obj));
-}
-
-/**
  * Handle modal authentication requests (e.g. HTTP basic)
  *
  * @since 3.0.0
@@ -679,7 +678,8 @@ async function handleMessage(settings, message, sendResponse) {
 
     // fetch file & parse fields if a login entry is present
     try {
-        if (typeof message.login !== "undefined") {
+        // do not fetch file for new login entries
+        if (typeof message.login !== "undefined" && message.action != "add") {
             await parseFields(settings, message.login);
         }
     } catch (e) {
@@ -720,7 +720,62 @@ async function handleMessage(settings, message, sendResponse) {
             } catch (e) {
                 sendResponse({
                     status: "error",
-                    message: "Unable to enumerate password files" + e.toString(),
+                    message: "Unable to enumerate password files. " + e.toString(),
+                });
+            }
+            break;
+        case "listDirs":
+            try {
+                var response = await hostAction(settings, "tree");
+                if (response.status != "ok") {
+                    throw new Error(JSON.stringify(response));
+                }
+                let dirs = response.data.directories;
+                sendResponse({ status: "ok", dirs });
+            } catch (e) {
+                sendResponse({
+                    status: "error",
+                    message: "Unable to enumerate directory trees. " + e.toString(),
+                });
+            }
+            break;
+        case "add":
+        case "save":
+            try {
+                var response = await hostAction(settings, "save", {
+                    storeId: message.login.store.id,
+                    file: `${message.login.login}.gpg`,
+                    contents: message.params.rawContents,
+                });
+
+                if (response.status != "ok") {
+                    alert(`Save failed: ${response.params.message}`);
+                    throw new Error(JSON.stringify(response)); // TODO handle host error
+                }
+                sendResponse({ status: "ok" });
+            } catch (e) {
+                sendResponse({
+                    status: "error",
+                    message: "Unable to save password file" + e.toString(),
+                });
+            }
+            break;
+        case "delete":
+            try {
+                var response = await hostAction(settings, "delete", {
+                    storeId: message.login.store.id,
+                    file: `${message.login.login}.gpg`,
+                });
+
+                if (response.status != "ok") {
+                    alert(`Delete failed: ${response.params.message}`);
+                    throw new Error(JSON.stringify(response));
+                }
+                sendResponse({ status: "ok" });
+            } catch (e) {
+                sendResponse({
+                    status: "error",
+                    message: "Unable to delete password file" + e.toString(),
                 });
             }
             break;
@@ -749,7 +804,7 @@ async function handleMessage(settings, message, sendResponse) {
             }
             break;
         case "copyOTP":
-            if (settings.enableOTP) {
+            if (helpers.getSetting("enableOTP", message.login, settings)) {
                 try {
                     if (!message.login.fields.otp) {
                         throw new Exception("No OTP seed available");
@@ -818,6 +873,15 @@ async function handleMessage(settings, message, sendResponse) {
 
                 // no need to check filledFields, because fillFields() already throws an error if empty
                 sendResponse({ status: "ok", filledFields: filledFields });
+
+                // copy OTP token after fill
+                if (
+                    typeof message.login !== "undefined" &&
+                    helpers.getSetting("enableOTP", message.login, settings) &&
+                    message.login.fields.hasOwnProperty("otp")
+                ) {
+                    copyToClipboard(helpers.makeTOTP(message.login.fields.otp.params));
+                }
             } catch (e) {
                 try {
                     sendResponse({
@@ -849,15 +913,6 @@ async function handleMessage(settings, message, sendResponse) {
                 message: "Unknown action: " + message.action,
             });
             break;
-    }
-
-    // copy OTP token after fill
-    if (
-        settings.enableOTP &&
-        typeof message.login !== "undefined" &&
-        message.login.fields.hasOwnProperty("otp")
-    ) {
-        copyToClipboard(helpers.makeTOTP(message.login.fields.otp.params));
     }
 }
 
@@ -895,23 +950,19 @@ function hostAction(settings, action, params = {}) {
 async function parseFields(settings, login) {
     var response = await hostAction(settings, "fetch", {
         storeId: login.store.id,
-        file: login.login + ".gpg",
+        file: login.loginPath,
     });
     if (response.status != "ok") {
         throw new Error(JSON.stringify(response)); // TODO handle host error
     }
 
+    var allowEmpty = ["login"];
+
     // save raw data inside login
     login.raw = response.data.contents;
 
     // parse lines
-    login.fields = {
-        secret: ["secret", "password", "pass"],
-        login: ["login", "username", "user"],
-        openid: ["openid"],
-        otp: ["otp", "totp"],
-        url: ["url", "uri", "website", "site", "link", "launch"],
-    };
+    login.fields = helpers.deepCopy(helpers.fieldsPrefix);
     login.settings = {
         autoSubmit: { name: "autosubmit", type: "bool" },
     };
@@ -923,7 +974,7 @@ async function parseFields(settings, login) {
         }
 
         // split key / value & ignore non-k/v lines
-        var parts = line.match(/^(.+?):(.+)$/);
+        var parts = line.match(/^(.+?):(.*)$/);
         if (parts === null) {
             return;
         }
@@ -931,7 +982,7 @@ async function parseFields(settings, login) {
             .slice(1)
             .map((value) => value.trim())
             .filter((value) => value.length);
-        if (parts.length != 2) {
+        if (!parts.length) {
             return;
         }
 
@@ -941,6 +992,9 @@ async function parseFields(settings, login) {
                 Array.isArray(login.fields[key]) &&
                 login.fields[key].includes(parts[0].toLowerCase())
             ) {
+                if (parts.length < 2 && !allowEmpty.includes(key)) {
+                    return;
+                }
                 login.fields[key] = parts[1];
                 break;
             }
@@ -969,7 +1023,7 @@ async function parseFields(settings, login) {
             if (key === "secret" && lines.length) {
                 login.fields.secret = lines[0];
             } else if (key === "login") {
-                const defaultUsername = getSetting("username", login, settings);
+                const defaultUsername = helpers.getSetting("username", login, settings);
                 login.fields[key] = defaultUsername || login.login.match(/([^\/]+)$/)[1];
             } else {
                 delete login.fields[key];
@@ -983,7 +1037,7 @@ async function parseFields(settings, login) {
     }
 
     // preprocess otp
-    if (settings.enableOTP && login.fields.hasOwnProperty("otp")) {
+    if (helpers.getSetting("enableOTP", login, settings) && login.fields.hasOwnProperty("otp")) {
         if (login.fields.otp.match(/^otpauth:\/\/.+/i)) {
             // attempt to parse otp data as URI
             try {
@@ -1075,7 +1129,7 @@ async function clearUsageData() {
  * @return void
  */
 async function saveSettings(settings) {
-    let settingsToSave = deepCopy(settings);
+    let settingsToSave = helpers.deepCopy(settings);
 
     // 'default' is our reserved name for the default store
     delete settingsToSave.stores.default;
